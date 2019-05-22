@@ -10,6 +10,7 @@
   "author": "Nicu Ionita",
   "license": "ISC",
   "dependencies": {
+    "express": "^4.17.0",
     "pcsclite": "^0.6.0"
   }
 }
