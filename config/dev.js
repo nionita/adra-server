@@ -1,3 +1,3 @@
 module.exports = {
-  adraSecret: 'adrase'
+  adraSecret: 'deadbeeffeed'
 }

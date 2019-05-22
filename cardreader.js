@@ -1,12 +1,6 @@
 const keys = require('./config/keys')
 const { readerConnected, readerDisconnected } = require('./state')
 
-// Check the settings
-if (!keys.adraSecret || keys.adraSecret.length !== 6) {
-  console.error('ADRA secret not correct!')
-  process.exit(1)
-}
-
 const pcsc = require('pcsclite')()
 
 // Some constants needed in SC communication
@@ -16,6 +10,7 @@ const mifare_1k_atr = Buffer.from([0x3B, 0x8F, 0x80, 0x01, 0x80, 0x4F, 0x0C, 0xA
 // Different APDU commands:
 const cmd_get_UID = Buffer.from([0xFF, 0xCA, 0x00, 0x00, 0x04])
 const cmd_get_ATS = Buffer.from([0xFF, 0xCA, 0x01, 0x00, 0x04]) // not supported on MIFARE 1k
+const cmd_load_key = Buffer.from([0xFF, 0x82, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ]) // we use only one key (0)
 
 // We accept only MIFARE 1k cards for now
 function is_mifare_1k(atr) {
@@ -62,6 +57,35 @@ function APDU_payload(data) {
   return payload
 }
 
+function make_auth_key() {
+  // Check the secret
+  if (!keys.adraSecret || keys.adraSecret.length < 12) {
+    console.error('ADRA secret not correct!')
+    process.exit(1)
+  }
+  try {
+    const buf_key = Buffer.from(keys.adraSecret, 'hex')
+    buf_key.copy(cmd_load_key, 5, 0, 6)
+  }
+  catch (e) {
+    console.error('Cannot create authentication key', e)
+    process.exit(1)
+  }
+}
+
+function load_auth_key(reader, protocol, next) {
+  console.log('Reader ' + reader.name + ': load authentication key')
+  APDU(reader, protocol, cmd_load_key, function(resp) {
+    const err = APDU_error(resp)
+    if (err === APDU_SUCCESS) {
+      console.log('Reader ' + reader.name + ': authentication key loaded')
+      next()
+    } else {
+      console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
+    }
+  })
+}
+
 function card_inserted(reader) {
   console.log('Reader ' + reader.name + ': card inserted')
 
@@ -78,8 +102,10 @@ function card_inserted(reader) {
         const err = APDU_error(data)
         if (err === APDU_SUCCESS) {
           const cuid = APDU_payload(data)
-          readerConnected(reader, protocol, cuid)
-          console.log('Card UID:', cuid)
+          load_auth_key(reader, protocol, function() {
+            readerConnected(reader, protocol, cuid)
+            console.log('Card UID:', cuid)
+          })
         } else {
           console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
         }
@@ -99,6 +125,8 @@ function card_removed(reader) {
     }
   })
 }
+
+make_auth_key()
 
 pcsc.on('reader', function(reader) {
   console.log('New reader detected:', reader.name)
