@@ -1,7 +1,10 @@
 const keys = require('./config/keys')
-const { readerConnected, readerDisconnected } = require('./state')
+const state = require('./state')
 
 const pcsc = require('pcsclite')()
+
+// Application constants
+const our_block_number = 4
 
 // Some constants needed in SC communication
 // ATR of MIFARE 1k:
@@ -10,7 +13,21 @@ const mifare_1k_atr = Buffer.from([0x3B, 0x8F, 0x80, 0x01, 0x80, 0x4F, 0x0C, 0xA
 // Different APDU commands:
 const cmd_get_UID = Buffer.from([0xFF, 0xCA, 0x00, 0x00, 0x04])
 const cmd_get_ATS = Buffer.from([0xFF, 0xCA, 0x01, 0x00, 0x04]) // not supported on MIFARE 1k
-const cmd_load_key = Buffer.from([0xFF, 0x82, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ]) // we use only one key (0)
+// const cmd_load_key = Buffer.from('FF82000006000000000000', 'hex') // we use only one key (location 0); key must be copied to the last 6 bytes of the buffer
+const cmd_load_key = Buffer.from('FF82000006FFFFFFFFFFFF', 'hex') // we use only one key (location 0); key must be copied to the last 6 bytes of the buffer
+const cmd_auth_a = Buffer.from('FF860000050100006000', 'hex') // authenticate block (position 7) with key type A, key location 0
+const cmd_auth_b = Buffer.from('FF860000050100006100', 'hex') // authenticate block (position 7) with key type B, key location 0
+const cmd_read = Buffer.from('FFB0000010', 'hex') // read 16 bytes from block (position 3)
+// const cmd_write = Buffer.from('FFD600001000000000000000000000000000000000', 'hex') // write 16 bytes in block (position 3); data must be copied to the last 16 bytes of the buffer
+
+// We must write our block number in all commands that involve a block number
+function set_block(block_number) {
+  cmd_auth_a[7] = block_number
+  cmd_auth_b[7] = block_number
+  cmd_read[3] = block_number
+}
+
+set_block(our_block_number)
 
 // We accept only MIFARE 1k cards for now
 function is_mifare_1k(atr) {
@@ -73,22 +90,27 @@ function make_auth_key() {
   }
 }
 
+// Load the auth key - once per server session
 function load_auth_key(reader, protocol, next) {
-  console.log('Reader ' + reader.name + ': load authentication key')
-  APDU(reader, protocol, cmd_load_key, function(resp) {
-    const err = APDU_error(resp)
-    if (err === APDU_SUCCESS) {
-      console.log('Reader ' + reader.name + ': authentication key loaded')
-      next()
-    } else {
-      console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
-    }
-  })
+  if (!state.readerHasAuthKey()) {
+    console.log('Reader ' + reader.name + ': load authentication key')
+    APDU(reader, protocol, cmd_load_key, function(resp) {
+      const err = APDU_error(resp)
+      if (err === APDU_SUCCESS) {
+        state.readerSentAuthKey()
+        console.log('Reader ' + reader.name + ': authentication key loaded')
+        next()
+      } else {
+        console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
+      }
+    })
+  } else {
+    next()
+  }
 }
 
 function card_inserted(reader) {
   console.log('Reader ' + reader.name + ': card inserted')
-
   // Card connect options
   const connect_options = { share_mode: reader.SCARD_SHARE_SHARED }
   // const connect_options = { share_mode: reader.SCARD_SHARE_DIRECT }
@@ -103,7 +125,7 @@ function card_inserted(reader) {
         if (err === APDU_SUCCESS) {
           const cuid = APDU_payload(data)
           load_auth_key(reader, protocol, function() {
-            readerConnected(reader, protocol, cuid)
+            state.readerConnected(reader, protocol, cuid)
             console.log('Card UID:', cuid)
           })
         } else {
@@ -116,7 +138,7 @@ function card_inserted(reader) {
 
 function card_removed(reader) {
   console.log('Reader ' + reader.name + ': card removed')
-  readerDisconnected()
+  state.readerDisconnected()
   reader.disconnect(reader.SCARD_LEAVE_CARD, function(err) {
     if (err) {
       console.log('Reader ' + reader.name + ': disconnect error:', err)
@@ -126,10 +148,12 @@ function card_removed(reader) {
   })
 }
 
-make_auth_key()
+// make_auth_key()
 
 pcsc.on('reader', function(reader) {
   console.log('New reader detected:', reader.name)
+
+  state.readerNew()
 
   reader.on('error', function(err) {
     console.log('Reader ' + this.name + ': error:', err.message)
@@ -161,6 +185,100 @@ pcsc.on('error', function(err) {
   console.log('PCSC error', err.message)
 })
 
-module.exports = {
+// Interface to access the card: read and write the block 0 of the current card (if any)
+function read_block_auth() {
+  return new Promise(function(resolve, reject) {
+    const { reader, protocol } = state.getROState()
+    if (!reader) {
+      resolve({ message: 'Reader is not connected or no card present' })
+    }
+    console.log('Reader ' + reader.name + ': authenticate block', our_block_number)
+    APDU(reader, protocol, cmd_auth, function(data) {
+      // Check the success of the operation
+      const err = APDU_error(data)
+      if (err === APDU_SUCCESS) {
+        console.log('Reader ' + reader.name + ': read block', our_block_number)
+        APDU(reader, protocol, cmd_read, function(data) {
+          const err = APDU_error(data)
+          if (err === APDU_SUCCESS) {
+            const block_data = APDU_payload(data)
+            resolve({ data: block_data })
+          } else {
+            console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
+            resolve({ message: 'Read - ' + APDU_ERR_MESSAGES[err] })
+          }
+        })
+      } else {
+        console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
+        resolve({ message: 'Authenticate - ' + APDU_ERR_MESSAGES[err] })
+      }
+    })
+  })
+}
 
+function APDU_promise(reader, protocol, cmd, block) {
+  return new Promise(function(resolve, reject) {
+    set_block(block)
+    APDU(reader, protocol, cmd, function(data) {
+      // Check the success of the operation
+      const err = APDU_error(data)
+      if (err === APDU_SUCCESS) {
+        resolve(true)
+      } else {
+        resolve(false)
+      }
+    })
+  })
+}
+
+function default_sector_auth() {
+  return new Promise(async function(resolve, reject) {
+    const { reader, protocol } = state.getROState()
+    if (!reader) {
+      resolve({ message: 'Reader is not connected or no card present' })
+    }
+    console.log('Find sectors with default auth')
+    const key_type = [
+      { type: 'A', cmd: cmd_auth_a, sectors: [] },
+      { type: 'B', cmd: cmd_auth_b, sectors: [] },
+    ]
+    for (kt of key_type) {
+      console.log('Key type', kt.type)
+      for (var sect = 0; sect < 16; sect++) {
+        const block = sect * 4
+        const ok = await APDU_promise(reader, protocol, kt.cmd, block)
+        console.log('Sector', sect, 'block', block, ':', ok)
+        if (ok) {
+          kt.sectors.append(sect)
+        }
+      }
+    }
+    resolve(key_type.map(kt => kt.sectors))
+  })
+}
+
+function read_block() {
+  const { reader, protocol } = state.getROState()
+  if (!reader) {
+    return { message: 'Reader is not connected or no card present' }
+  }
+  return new Promise(function(resolve, reject) {
+    console.log('Reader ' + reader.name + ': read block 0')
+    APDU(reader, protocol, cmd_read, function(data) {
+      const err = APDU_error(data)
+      if (err === APDU_SUCCESS) {
+        const block_data = APDU_payload(data)
+        resolve({ data: block_data })
+      } else {
+        console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
+        resolve({ message: 'Read - ' + APDU_ERR_MESSAGES[err] })
+      }
+    })
+  })
+}
+
+module.exports = {
+  // read_block: read_block,
+  // read_block: read_block_auth,
+  read_block: default_sector_auth,
 }
