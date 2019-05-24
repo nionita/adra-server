@@ -5,9 +5,18 @@ const app = express()
 
 app.get('/api/read', async (req, res) => {
   console.log('API call: read')
-  const block_data = await cardreader.read_block()
-  console.log('Read result:', block_data)
-  res.send(JSON.stringify(block_data))
+  const read_result = await cardreader.read_block()
+  console.log('Read result:', read_result)
+  res.send(JSON.stringify(read_result))
+})
+
+app.post('/api/write', async (req, res) => {
+  console.log('API call: read')
+  // const { id } = req.body
+  const data = Buffer.from('ADRA 12345678901', 'utf8')
+  const write_result = await cardreader.write_block(data)
+  console.log('Read result:', write_result)
+  res.send(JSON.stringify(write_result))
 })
 
 app.get('/api/readdef', async (req, res) => {

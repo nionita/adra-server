@@ -5,6 +5,8 @@ const state = require('./state')
 const pcsc = require('pcsclite')()
 
 // Application constants
+
+// Use only 1 block to write/read the member id
 const our_block_number = 4
 
 // Some constants needed in SC communication
@@ -12,62 +14,11 @@ const our_block_number = 4
 const mifare_1k_atr = Buffer.from([0x3B, 0x8F, 0x80, 0x01, 0x80, 0x4F, 0x0C, 0xA0, 0x00, 0x00, 0x03, 0x06, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x6A])
 
 // Different APDU commands:
-const cmd_get_UID = Buffer.from([0xFF, 0xCA, 0x00, 0x00, 0x04])
-const cmd_get_ATS = Buffer.from([0xFF, 0xCA, 0x01, 0x00, 0x04]) // not supported on MIFARE 1k
-// const cmd_load_key = Buffer.from('FF82000006000000000000', 'hex') // we use only one key (location 0); key must be copied to the last 6 bytes of the buffer
+const cmd_get_UID = Buffer.from('FFCA000004', 'hex')
 const cmd_load_key = Buffer.from('FF82000006FFFFFFFFFFFF', 'hex') // we use only one key (location 0); key must be copied to the last 6 bytes of the buffer
 const cmd_auth = Buffer.from('FF860000050100006000', 'hex') // authenticate block (position 7) with key type A, key location 0
 const cmd_read = Buffer.from('FFB0000010', 'hex') // read 16 bytes from block (position 3)
-// const cmd_write = Buffer.from('FFD600001000000000000000000000000000000000', 'hex') // write 16 bytes in block (position 3); data must be copied to the last 16 bytes of the buffer
-
-// We accept only MIFARE 1k cards for now
-function is_mifare_1k(atr) {
-  return mifare_1k_atr.compare(atr) === 0
-}
-
-// APDU with the PICC: send command, receive response
-function APDU(reader, protocol, cmd, debug=false) {
-  return new Promise((resolve, reject) => {
-    reader.transmit(cmd, 256, protocol, function(err, data) {
-      if (err) {
-        console.log('Reader ' + reader.name + ': transmit error:', err)
-        reject(err)
-      } else {
-        if (debug) {
-          console.log('Reader ' + reader.name + ': received data:', data)
-        }
-        resolve(data)
-      }
-    })
-  })
-}
-
-async function APDU_auth(reader, protocol, block, keytype='A', keyloc=0, debug=false) {
-  const cmd = Buffer.from(cmd_auth)
-  if (keytype === 'B') {
-    cmd[8] = 0x61
-  } else if (keytype !== 'A') {
-    throw('Wrong key type ' + keytype)
-  }
-  if (keyloc === 1) {
-    cmd[9] = 0x01
-  } else if (keyloc !== 0) {
-    throw('Wrong key location ' + keyloc)
-  }
-  if (block >= 64) {
-    throw('Block too big ' + block)
-  }
-  cmd[7] = block
-  try {
-    const data = await APDU(reader, protocol, cmd, debug)
-    // Check the success of the operation
-    const err = APDU_error(data)
-    return err === APDU_SUCCESS
-  }
-  catch (e) {
-    return false
-  }
-}
+const cmd_write = Buffer.from('FFD6000010', 'hex') // write 16 bytes in block (position 3); data buffer must be concatenated at the end
 
 // APDU success/errors
 const APDU_SUCCESS = 0
@@ -97,47 +48,139 @@ function APDU_payload(data) {
   return payload
 }
 
+// We accept only MIFARE 1k cards for now
+function is_mifare_1k(atr) {
+  return mifare_1k_atr.compare(atr) === 0
+}
+
+// APDU with the PICC: send command, receive response
+function APDU(reader, protocol, cmd, debug=false) {
+  return new Promise((resolve, reject) => {
+    reader.transmit(cmd, 256, protocol, function(err, data) {
+      if (err) {
+        console.log('Reader ' + reader.name + ': transmit error:', err)
+        reject('transmit error: ' + err)
+      } else {
+        if (debug) {
+          console.log('Reader ' + reader.name + ': received data:', data)
+        }
+        resolve(data)
+      }
+    })
+  })
+}
+
+async function APDU_auth(reader, protocol, block, keytype='A', keyloc=0, debug=false) {
+  const cmd = Buffer.from(cmd_auth)
+  if (block >= 64) {
+    throw 'Auth: block number too big ' + block
+  }
+  cmd[7] = block
+  if (keytype === 'B') {
+    cmd[8] = 0x61
+  } else if (keytype !== 'A') {
+    throw 'Auth: wrong key type ' + keytype
+  }
+  if (keyloc === 1) {
+    cmd[9] = 0x01
+  } else if (keyloc !== 0) {
+    throw 'Auth: wrong key location ' + keyloc
+  }
+  let data
+  try {
+    data = await APDU(reader, protocol, cmd, debug)
+  }
+  catch (e) {
+    throw 'Auth: ' + e
+  }
+  // Check the success of the operation
+  const err = APDU_error(data)
+  if (err !== APDU_SUCCESS) {
+    throw 'Auth error: ' + APDU_ERR_MESSAGES[err]
+  }
+}
+
+async function APDU_read(reader, protocol, block, debug=false) {
+  const cmd = Buffer.from(cmd_read)
+  if (block >= 64) {
+    throw 'Read: block number too big ' + block
+  }
+  cmd[3] = block
+  let data
+  try {
+    data = await APDU(reader, protocol, cmd, debug)
+  }
+  catch (e) {
+    throw 'Read: ' + e
+  }
+  // Check the success of the operation
+  const err = APDU_error(data)
+  if (err !== APDU_SUCCESS) {
+    throw 'Read error: ' + APDU_ERR_MESSAGES[err]
+  }
+  return APDU_payload(data)
+}
+
+async function APDU_write(reader, protocol, block, data, debug=false) {
+  const cmd = Buffer.concat([cmd_write, data], 21)
+  if (block >= 64) {
+    throw 'Write: block number too big ' + block
+  }
+  cmd[3] = block
+  let res
+  try {
+    res = await APDU(reader, protocol, cmd, debug)
+  }
+  catch (e) {
+    throw 'Write: ' + e
+  }
+  // Check the success of the operation
+  const err = APDU_error(res)
+  if (err !== APDU_SUCCESS) {
+    throw 'Write error: ' + APDU_ERR_MESSAGES[err]
+  }
+}
+
 function make_auth_key(key) {
   // Check the key
   if (!key || key.length !== 12) {
-    throw('Key not correct')
+    throw 'Make auth key: incorrect key specification'
   }
   try {
     const buf_key = Buffer.from(key, 'hex')
     buf_key.copy(cmd_load_key, 5, 0, 6)
   }
   catch (e) {
-    throw('Cannot create authentication key:', e)
+    throw 'Make auth key: cannot create authentication key: ' + e
   }
 }
 
 // Load the auth key - once per server session
 function load_auth_key(reader, protocol, debug=false) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (state.readerHasAuthKey()) {
       resolve()
     } else {
       if (debug) {
         console.log('Reader ' + reader.name + ': load authentication key')
       }
-      APDU(reader, protocol, cmd_load_key, debug)
-        .then(resp => {
-          const err = APDU_error(resp)
-          if (err === APDU_SUCCESS) {
-            state.readerSentAuthKey()
-            if (debug) {
-              console.log('Reader ' + reader.name + ': authentication key loaded')
-            }
-            resolve()
-          } else {
-            console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
-            reject()
+      try {
+        const resp = await APDU(reader, protocol, cmd_load_key, debug)
+        const err = APDU_error(resp)
+        if (err === APDU_SUCCESS) {
+          state.readerSentAuthKey()
+          if (debug) {
+            console.log('Reader ' + reader.name + ': authentication key loaded')
           }
-        })
-        .catch((err) => {
-          console.log('Reader ' + reader.name + ': APDU exception:', err)
+          resolve()
+        } else {
+          console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
           reject()
-        })
+        }
+      }
+      catch (e) {
+        reject()
+      }
     }
   })
 }
@@ -198,7 +241,7 @@ pcsc.on('reader', function(reader) {
   reader.on('status', function(status) {
     console.log('Reader ' + this.name + ': status:', status.state, 'ATR:', status.atr)
     /* check what has changed */
-    var changes = this.state ^ status.state
+    let changes = this.state ^ status.state
     if (changes) {
       if ((changes & this.SCARD_STATE_EMPTY) && (status.state & this.SCARD_STATE_EMPTY)) {
         card_removed(reader)
@@ -222,71 +265,61 @@ pcsc.on('error', function(err) {
 })
 
 // Interface to access the card: read and write the block 0 of the current card (if any)
-function read_block() {
-  const { reader, protocol } = state.getROState()
-  if (!reader) {
-    return { message: 'Reader is not connected or no card present' }
-  }
-  return new Promise(function(resolve, reject) {
-    console.log('Reader ' + reader.name + ': read block 0')
-    APDU(reader, protocol, cmd_read, function(data) {
-      const err = APDU_error(data)
-      if (err === APDU_SUCCESS) {
-        const block_data = APDU_payload(data)
-        resolve({ data: block_data })
-      } else {
-        console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
-        resolve({ message: 'Read - ' + APDU_ERR_MESSAGES[err] })
-      }
-    })
-  })
-}
-
-function read_block_auth() {
-  return new Promise(function(resolve, reject) {
+function auth_read_block(debug=false) {
+  return new Promise(async (resolve, reject) => {
     const { reader, protocol } = state.getROState()
     if (!reader) {
       resolve({ message: 'Reader is not connected or no card present' })
     }
-    console.log('Reader ' + reader.name + ': authenticate block', our_block_number)
-    APDU(reader, protocol, cmd_auth, function(data) {
-      // Check the success of the operation
-      const err = APDU_error(data)
-      if (err === APDU_SUCCESS) {
+    if (debug) {
+      console.log('Reader ' + reader.name + ': authenticate block', our_block_number)
+    }
+    try {
+      // Currently we always authenticate a block before we read
+      // But MIFARE does need authentication only if the sector changes
+      // We could use an internal state with last authenticated sector
+      // and then authenticate only when needed
+      await APDU_auth(reader, protocol, our_block_number)
+      if (debug) {
         console.log('Reader ' + reader.name + ': read block', our_block_number)
-        APDU(reader, protocol, cmd_read, function(data) {
-          const err = APDU_error(data)
-          if (err === APDU_SUCCESS) {
-            const block_data = APDU_payload(data)
-            resolve({ data: block_data })
-          } else {
-            console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
-            resolve({ message: 'Read - ' + APDU_ERR_MESSAGES[err] })
-          }
-        })
-      } else {
-        console.log('Reader ' + reader.name + ': APDU error:', APDU_ERR_MESSAGES[err])
-        resolve({ message: 'Authenticate - ' + APDU_ERR_MESSAGES[err] })
       }
-    })
+      const data = await APDU_read(reader, protocol, our_block_number)
+      resolve({ data })
+    }
+    catch (e) {
+      resolve({ message: e })
+    }
   })
 }
 
-// function APDU_promise(reader, protocol, cmd, block) {
-//   return new Promise(function(resolve, reject) {
-//     set_block(block)
-//     APDU(reader, protocol, cmd, function(data) {
-//       // Check the success of the operation
-//       const err = APDU_error(data)
-//       if (err === APDU_SUCCESS) {
-//         resolve(true)
-//       } else {
-//         resolve(false)
-//       }
-//     })
-//   })
-// }
+function auth_write_block(data, debug=false) {
+  return new Promise(async (resolve, reject) => {
+    const { reader, protocol } = state.getROState()
+    if (!reader) {
+      resolve({ message: 'Reader is not connected or no card present' })
+    }
+    if (debug) {
+      console.log('Reader ' + reader.name + ': authenticate block', our_block_number)
+    }
+    try {
+      // Currently we always authenticate a block before we read
+      // But MIFARE does need authentication only if the sector changes
+      // We could use an internal state with last authenticated sector
+      // and then authenticate only when needed
+      await APDU_auth(reader, protocol, our_block_number)
+      if (debug) {
+        console.log('Reader ' + reader.name + ': write block', our_block_number)
+      }
+      await APDU_write(reader, protocol, our_block_number, data)
+      resolve({ message: 'done' })
+    }
+    catch (e) {
+      resolve({ message: e })
+    }
+  })
+}
 
+// Scan the sectors and try to auth with the default key as key A (default for new cards)
 function default_sector_auth() {
   return new Promise(async function(resolve, reject) {
     const { reader, protocol } = state.getROState()
@@ -294,19 +327,20 @@ function default_sector_auth() {
       resolve({ message: 'Reader is not connected or no card present' })
     }
     console.log('Find sectors with default auth')
-    const sectors = new Set()
-    for (var sect = 0; sect < 16; sect++) {
+    const sectors = []
+    for (let sect = 0; sect < 16; sect++) {
       const block = sect * 4
-      var ok = false
+      let ok = true
       try {
-        ok = await APDU_auth(reader, protocol, block)
+        await APDU_auth(reader, protocol, block)
         console.log('Sector', sect, 'block', block, ':', ok)
       }
       catch (e) {
         console.log('APDU_auth error:', e)
+        ok = false
       }
       if (ok) {
-        sectors.add(sect)
+        sectors.push(sect)
       }
     }
     resolve(sectors)
@@ -324,7 +358,7 @@ function scan_sector_auth() {
     const dmkeys = require('./mifare_keys')
     const found = {}
     for (key of dmkeys) {
-      var key_ok = true
+      let key_ok = true
       try {
         make_auth_key(key)
       }
@@ -338,19 +372,20 @@ function scan_sector_auth() {
         state.readerNew()
         await load_auth_key(reader, protocol)
         const sectors = []
-        for (var sect = 0; sect < 16; sect++) {
+        for (let sect = 0; sect < 16; sect++) {
           // Only the first block from every sector
           const block = sect * 4 + 3
-          var ok = false
+          let ok = true
           try {
-            ok = await APDU_auth(reader, protocol, block, 'B')
+            await APDU_auth(reader, protocol, block, 'B')
             console.log('Sector', sect, 'block', block, ':', ok)
           }
           catch (e) {
+            ok = false
             console.log('APDU_auth error:', e)
           }
           if (ok) {
-            sectors.append(sect)
+            sectors.push(sect)
           }
         }
         if (sectors.length > 0) {
@@ -363,8 +398,8 @@ function scan_sector_auth() {
 }
 
 module.exports = {
-  // read_block: read_block,
-  read_block: read_block_auth,
+  read_block: auth_read_block,
+  write_block: auth_write_block,
   read_default: default_sector_auth,
   scan_auth: scan_sector_auth,
 }
