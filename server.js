@@ -1,21 +1,29 @@
 const express = require('express')
+const body_parser = require('body-parser')
 const cardreader = require('./cardreader')
 
 const app = express()
+
+app.use(body_parser.json())
 
 app.get('/api/read', async (req, res) => {
   console.log('API call: read')
   const read_result = await cardreader.read_block()
   console.log('Read result:', read_result)
+  if ('data' in read_result) {
+    read_result.data = read_result.data.toString('ascii')
+  }
   res.send(JSON.stringify(read_result))
 })
 
 app.post('/api/write', async (req, res) => {
-  console.log('API call: read')
+  console.log('API call: write')
+  console.log(req.body)
   // const { id } = req.body
-  const data = Buffer.from('ADRA 12345678901', 'utf8')
-  const write_result = await cardreader.write_block(data)
-  console.log('Read result:', write_result)
+  // const data = Buffer.from('ADRA 12345678901', 'utf8')
+  // const write_result = await cardreader.write_block(data)
+  const write_result = { message: 'aha' }
+  // console.log('Read result:', write_result)
   res.send(JSON.stringify(write_result))
 })
 

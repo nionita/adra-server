@@ -2,14 +2,15 @@
   "name": "adra-server",
   "version": "1.0.0",
   "description": "ADRA Smartcard Server",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "serve": "node server.js",
+    "read": "node client.js"
   },
   "author": "Nicu Ionita",
   "license": "ISC",
   "dependencies": {
+    "body-parser": "^1.19.0",
     "express": "^4.17.0",
     "pcsclite": "^0.6.0"
   }
