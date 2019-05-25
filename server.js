@@ -11,9 +11,18 @@ app.get('/api/read', async (req, res) => {
   const read_result = await cardreader.read_block()
   console.log('Read result:', read_result)
   if ('data' in read_result) {
-    read_result.data = read_result.data.toString('ascii')
+    const data_string = read_result.data.toString('ascii')
+    const match = data_string.match(/^ADRA (\d+)$/)
+    if (match) {
+      const read_ok = { id: Number(match[1]) }
+      res.send(JSON.stringify(read_ok))
+    } else {
+      const read_nok = { message: 'Not the correct block content: ' + data_string }
+      res.send(JSON.stringify(read_nok))
+    }
+  } else {
+    res.send(JSON.stringify(read_result))
   }
-  res.send(JSON.stringify(read_result))
 })
 
 app.post('/api/write', async (req, res) => {
