@@ -276,7 +276,7 @@ function auth_read_block(debug=false) {
     }
     try {
       // Currently we always authenticate a block before we read
-      // But MIFARE does need authentication only if the sector changes
+      // But MIFARE needs authentication only if the sector changes
       // We could use an internal state with last authenticated sector
       // and then authenticate only when needed
       await APDU_auth(reader, protocol, our_block_number)
@@ -302,8 +302,8 @@ function auth_write_block(data, debug=false) {
       console.log('Reader ' + reader.name + ': authenticate block', our_block_number)
     }
     try {
-      // Currently we always authenticate a block before we read
-      // But MIFARE does need authentication only if the sector changes
+      // Currently we always authenticate a block before we write
+      // But MIFARE needs authentication only if the sector changes
       // We could use an internal state with last authenticated sector
       // and then authenticate only when needed
       await APDU_auth(reader, protocol, our_block_number)

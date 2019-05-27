@@ -2,8 +2,8 @@
  * This is a simple client to test the smart card server
  * It can:
  * - read the application sector and display it, when no parameter was given
- * - write the given as parameter, which must be a number, to the application sector
- * If the more than 1 parameter are given, or if the given parameter is '-h' or '--help',
+ * - write the given parameter, which must be a number, to the application sector
+ * If more than one parameter are given, or if the given parameter is '-h' or '--help',
  * or if the given parameter is not a number, it will display a help text and do nothing else
  */
 

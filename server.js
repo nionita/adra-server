@@ -4,6 +4,13 @@ const cardreader = require('./cardreader')
 
 const app = express()
 
+// Simple format of the identifier (number): fill to 11 decimal places
+// We do not test what numb contains!
+const format = numb => {
+  const filled = '0000000000' + numb
+  return filled.substring(filled.length - 11)
+}
+
 app.use(body_parser.json())
 
 app.get('/api/read', async (req, res) => {
@@ -28,11 +35,19 @@ app.get('/api/read', async (req, res) => {
 app.post('/api/write', async (req, res) => {
   console.log('API call: write')
   console.log(req.body)
-  // const { id } = req.body
-  // const data = Buffer.from('ADRA 12345678901', 'utf8')
-  // const write_result = await cardreader.write_block(data)
-  const write_result = { message: 'aha' }
-  // console.log('Read result:', write_result)
+  const { id } = req.body
+  let write_result
+  // id must be a number, otherwise is an error
+  if (id + 0 == id) {
+    console.log('Want to write id', id)
+    const formatted = 'ADRA ' + format(id)
+    const data = Buffer.from(formatted, 'utf8')
+    write_result = await cardreader.write_block(data)
+    // const write_result = '{ ok: true }'
+    console.log('Write result:', write_result)
+  } else {
+    write_result = { message: 'Given id must be a number' }
+  }
   res.send(JSON.stringify(write_result))
 })
 
