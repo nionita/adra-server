@@ -13,10 +13,28 @@ const format = numb => {
 
 app.use(body_parser.json())
 
+// This is not needed for read
+app.options('/api/write', async (req, res) => {
+  console.log('API call: options write')
+  console.log(req.headers)
+  // Todo: allow only configured origins!
+  // Currently any site could get the data, which could be a security issue
+  res.setHeader('Access-Control-Allow-Origin', req.headers['origin'])
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Vary', 'Accept-Encoding, Origin')
+  console.log('Headers', res.getHeaders())
+  res.send()
+})
+
 app.get('/api/read', async (req, res) => {
   console.log('API call: read')
   const read_result = await cardreader.read_block()
   console.log('Read result:', read_result)
+  // Todo: allow only configured origins!
+  res.setHeader('Access-Control-Allow-Origin', req.headers['origin'])
+  res.setHeader('Content-Type', 'application/json')
+  // console.log('Response headers', res.getHeaders())
   if ('data' in read_result) {
     const data_string = read_result.data.toString('ascii')
     const match = data_string.match(/^ADRA (\d+)$/)
@@ -48,6 +66,10 @@ app.post('/api/write', async (req, res) => {
   } else {
     write_result = { message: 'Given id must be a number' }
   }
+  // Todo: allow only configured origins!
+  res.setHeader('Access-Control-Allow-Origin', req.headers['origin'])
+  res.setHeader('Content-Type', 'application/json')
+  console.log('Response headers', res.getHeaders())
   res.send(JSON.stringify(write_result))
 })
 
@@ -65,7 +87,7 @@ app.get('/api/scan', async (req, res) => {
   res.send(JSON.stringify(scan_result))
 })
 
-const PORT = process.env.PORT || 5000
+const PORT = process.env.PORT || 7200
 app.listen(PORT, () => {
   console.log(`Listening on port`, PORT)
 })
