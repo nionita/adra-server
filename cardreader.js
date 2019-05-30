@@ -1,4 +1,4 @@
-const util = require('util')
+// const util = require('util')
 const keys = require('./config/keys')
 const state = require('./state')
 
@@ -240,7 +240,7 @@ pcsc.on('reader', function(reader) {
 
   reader.on('status', function(status) {
     console.log('Reader ' + this.name + ': status:', status.state, 'ATR:', status.atr)
-    /* check what has changed */
+    // check what has changed
     let changes = this.state ^ status.state
     if (changes) {
       if ((changes & this.SCARD_STATE_EMPTY) && (status.state & this.SCARD_STATE_EMPTY)) {
@@ -319,87 +319,7 @@ function auth_write_block(data, debug=false) {
   })
 }
 
-// Scan the sectors and try to auth with the default key as key A (default for new cards)
-function default_sector_auth() {
-  return new Promise(async function(resolve, reject) {
-    const { reader, protocol } = state.getROState()
-    if (!reader) {
-      resolve({ message: 'Reader is not connected or no card present' })
-    }
-    console.log('Find sectors with default auth')
-    const sectors = []
-    for (let sect = 0; sect < 16; sect++) {
-      const block = sect * 4
-      let ok = true
-      try {
-        await APDU_auth(reader, protocol, block)
-        console.log('Sector', sect, 'block', block, ':', ok)
-      }
-      catch (e) {
-        console.log('APDU_auth error:', e)
-        ok = false
-      }
-      if (ok) {
-        sectors.push(sect)
-      }
-    }
-    resolve(sectors)
-  })
-}
-
-// Search a correct auth key from a list of default MIFARE keys
-function scan_sector_auth() {
-  return new Promise(async function(resolve, reject) {
-    const { reader, protocol } = state.getROState()
-    if (!reader) {
-      resolve({ message: 'Reader is not connected or no card present' })
-    }
-    console.log('Find sectors with default mifare auth keys')
-    const dmkeys = require('./mifare_keys')
-    const found = {}
-    for (key of dmkeys) {
-      let key_ok = true
-      try {
-        make_auth_key(key)
-      }
-      catch (e) {
-        console.log('Key', key, 'error:', e)
-        key_ok = false
-      }
-      if (key_ok) {
-        console.log('Key', key)
-        // Prepare to load the new key
-        state.readerNew()
-        await load_auth_key(reader, protocol)
-        const sectors = []
-        for (let sect = 0; sect < 16; sect++) {
-          // Only the first block from every sector
-          const block = sect * 4 + 3
-          let ok = true
-          try {
-            await APDU_auth(reader, protocol, block, 'B')
-            console.log('Sector', sect, 'block', block, ':', ok)
-          }
-          catch (e) {
-            ok = false
-            console.log('APDU_auth error:', e)
-          }
-          if (ok) {
-            sectors.push(sect)
-          }
-        }
-        if (sectors.length > 0) {
-          found['key'] = []
-        }
-      }
-    }
-    resolve(found)
-  })
-}
-
 module.exports = {
   read_block: auth_read_block,
   write_block: auth_write_block,
-  read_default: default_sector_auth,
-  scan_auth: scan_sector_auth,
 }

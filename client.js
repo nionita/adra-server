@@ -5,6 +5,8 @@
  * - write the given parameter, which must be a number, to the application sector
  * If more than one parameter are given, or if the given parameter is '-h' or '--help',
  * or if the given parameter is not a number, it will display a help text and do nothing else
+ *
+ * The client works only with the ID API
  */
 
 const help = () => {
@@ -19,14 +21,14 @@ const help = () => {
 const http = require('http')
 
 const get_options = {
-  port: 5000,
-  path: '/api/read',
+  port: 7200,
+  path: '/api/id',
   method: 'GET'
 }
 
 const post_options = {
-  port: 5000,
-  path: '/api/write',
+  port: 7200,
+  path: '/api/id',
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
