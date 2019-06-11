@@ -8,6 +8,10 @@
     "read": "node client.js"
   },
   "author": "Nicu Ionita",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nionita/adra-server"
+  },
   "license": "ISC",
   "dependencies": {
     "body-parser": "^1.19.0",
