@@ -7,6 +7,7 @@
  * or if the given parameter is not a number, it will display a help text and do nothing else
  *
  * The client works only with the ID API
+ * Also it works only with the http protocol (not https), so you must start the server with the option -u
  */
 
 const help = () => {
