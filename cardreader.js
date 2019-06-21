@@ -1,7 +1,5 @@
-// const util = require('util')
-const keys = require('./config/keys')
+// const keys = require('./config/keys')
 const state = require('./state')
-
 const pcsc = require('pcsclite')()
 
 // Application constants

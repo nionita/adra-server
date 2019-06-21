@@ -27,12 +27,13 @@ if (!err) {
   const body_parser = require('body-parser')
   const idAPI = require('./id-api')
   const blockAPI = require('./block-api')
+  const cardreader = require('./cardreader')
 
   const app = express()
 
   app.use(body_parser.json())
-  idAPI(app)
-  blockAPI(app)
+  idAPI(app, cardreader)
+  blockAPI(app, cardreader)
 
   const PORT = process.env.PORT || 7200
   let server

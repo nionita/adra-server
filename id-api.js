@@ -8,10 +8,9 @@
  */
 
 const cors = require('cors')
-const cardreader = require('./cardreader')
 const { format } = require('./utils')
 
-module.exports = app => {
+module.exports = (app, cardreader) => {
   // Todo: allow only configured origins!
   app.get('/api/id', cors(), async (req, res) => {
     // console.log('API call: read')
